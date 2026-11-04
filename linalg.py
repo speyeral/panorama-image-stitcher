@@ -31,3 +31,20 @@ def solve(A, b, tol=1e-10):
     aug = np.hstack([A_work, b_work])
     R = rref(aug, tol=tol)
     return R[:, -1]
+
+def inverse(A):
+    """Computes matrix inverse."""
+    return np.linalg.inv(A)
+
+def det(A):
+    """Computes matrix determinant."""
+    return float(np.linalg.det(A))
+
+def rank(M):
+    """Computes matrix rank."""
+    return int(np.linalg.matrix_rank(M))
+
+def nullspace_vector(M, tol=1e-10):
+    """Computes a non-zero vector in the nullspace of M (e.g. via SVD)."""
+    _, s, vh = np.linalg.svd(M)
+    return vh[-1]

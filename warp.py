@@ -1,6 +1,11 @@
 import numpy as np
+import linalg
 
 def check_h(H, shape): pass
+
+def canvas_bounds(H_list, shapes):
+    """Stub for canvas_bounds."""
+    return (100, 100), (0, 0)
 
 def warp_image(img, H, canvas_shape, offset):
     """Minimal nearest-neighbor warp for Nov 4 slice."""
@@ -10,8 +15,7 @@ def warp_image(img, H, canvas_shape, offset):
     src_x = np.zeros((cH, cW), dtype=float)
     src_y = np.zeros((cH, cW), dtype=float)
     
-    # Using np.linalg.inv strictly for this minimal stub until linalg.inverse lands Nov 9
-    H_inv = np.linalg.inv(H) 
+    H_inv = linalg.inverse(H)
     
     grid_x, grid_y = np.meshgrid(np.arange(cW), np.arange(cH))
     pts = np.stack([grid_x, grid_y, np.ones_like(grid_x)], axis=-1).reshape(-1, 3)

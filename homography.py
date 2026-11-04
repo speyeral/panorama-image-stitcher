@@ -8,7 +8,7 @@ def normalize_points(pts):
     pts = np.asarray(pts, dtype=float)
     cx, cy = np.mean(pts, axis=0)
     shifted = pts - [cx, cy]
-    mean_dist = np.mean(np.linalg.norm(shifted, axis=1))
+    mean_dist = np.mean(np.sqrt(np.sum(shifted**2, axis=1)))
     s = np.sqrt(2) / (mean_dist if mean_dist > 1e-12 else 1.0)
     
     T = np.array([[s, 0, -s * cx], 
@@ -57,4 +57,5 @@ def solve_homography(src, dst):
 
 # Identity Stubs for interface freeze
 def solve_homography_lsq(src, dst): return np.eye(3)
+def algebraic_residual(H, src, dst): return 0.0
 def transfer_error(H, src, dst): return np.zeros(len(src))
