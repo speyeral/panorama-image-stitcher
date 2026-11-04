@@ -16,9 +16,9 @@
 | S2 Analysis | Fri Nov 13 | Monte Carlo (V1.7, V1.8) |
 | S3 buffer | Nov 12–15 | RANSAC, matching (droppable), delays |
 | Final | Mon Nov 16 | Integration check, Reflection |
-| Paper | Nov 10, 12, 14, 16 | See the paper issues below |
+| Paper | Nov 10, 12, 14, 16 | See Google Docs document for details |
 
-V-ID mapping: V0.x belongs to S0/S1, V1.x to S2, V2.x to S2 blend, V3.x to S3. Nov 9 and Nov 16 are Mondays: check the exam date against both.
+V-ID mapping: V0.x belongs to S0/S1, V1.x to S2, V2.x to S2 blend, V3.x to S3. 
 
 ## Interface contract
 
