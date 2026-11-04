@@ -48,4 +48,9 @@ Points are (N, 2) float arrays of (x, y). H is 3×3 with h33 = 1. `warp_image` m
 | V0.4–V0.6 | Known-H; identity and affine; invalid input | Lead | Nov 9 |
 | V0.7 | Warp exactness, corners, canvas cap, no NaN | Person 2 | Nov 9 |
 | V0.8, V0.9 | Points; imgops | Person 3 | Nov 9 |
-| V0.10 | Hero demo on the real rectangle photo | Person 3 w
+| V0.10 | Hero demo on the real rectangle photo | Person 3 writes, Lead runs | Nov 9 |
+| V1.1–V1.6 | LSQ correctness, optimality, rank guard | Person 4 | Nov 11 |
+| V1.7, V1.8 | Monte Carlo with and without normalization | Person 4 | Nov 13 |
+| V2.1–V2.7 | Blend | Person 2 | Nov 11 |
+| V3.1–V3.3 | Gradients, Harris, patch matching | Person 3 | S3 |
+| V3.4–V3.8 | RANSAC accuracy, seed, failure cases, iteration formula, real pair | Lead | S3 |
