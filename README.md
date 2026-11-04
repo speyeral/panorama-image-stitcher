@@ -10,7 +10,7 @@
 
 | Label | Date | What lands |
 | --- | --- | --- |
-| S0 | Wed Nov 4 | Lead’s thin slice, interface freeze, `linalg.py` wrapper |
+| S0 | Wed Nov 4 | initial files, interface freeze, `linalg.py` wrapper |
 | S1 | Mon Nov 9 | Exact solver, warp, I/O, points, imgops, `linalg.py` core, hero demo |
 | S2 | Wed Nov 11 | LSQ, blend, rest of `linalg.py`, theorem tests, panorama demo, slides draft |
 | S2 Analysis | Fri Nov 13 | Monte Carlo (V1.7, V1.8) |
