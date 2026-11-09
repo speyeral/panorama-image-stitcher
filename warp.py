@@ -3,7 +3,6 @@ import linalg
 from homography import HomographyError
 
 W_EPS = 1e-12
-DET_EPS = 1e-12
 MAX_CANVAS_SIDE = 20000
 MAX_CANVAS_PIXELS = 100_000_000
 TILE_PIXELS = 1_000_000
@@ -28,7 +27,10 @@ def check_h(H, shape):
     """Raise HomographyError if H cannot be warped safely.
 
     Rejects non-finite/non-3x3 input, singular matrices (warp_image needs
-    H^-1), and any corner whose projective denominator w is zero or near
+    H^-1, so invertibility is tested by attempting the inverse rather than
+    comparing |det H| to a fixed threshold, which would reject valid
+    small-scale homographies), and any corner whose projective denominator
+    w is zero or near
     zero. w is linear in (x, y), so its extremes over the image rectangle
     occur at the corners: a zero or sign change among them means the
     horizon touches or crosses the image, making the perspective division
@@ -37,8 +39,12 @@ def check_h(H, shape):
     H = np.asarray(H, dtype=float)
     if H.shape != (3, 3) or not np.all(np.isfinite(H)):
         raise HomographyError("H must be a finite 3x3 matrix")
-    if abs(linalg.det(H)) <= DET_EPS:
-        raise HomographyError("H is singular")
+    try:
+        H_inv = linalg.inverse(H)
+    except Exception as e:
+        raise HomographyError("H is singular") from e
+    if not np.all(np.isfinite(H_inv)):
+        raise HomographyError("H is numerically singular")
     _, w = _map_points(H, _corners(shape))
     if np.any(np.abs(w) <= W_EPS):
         raise HomographyError("homography horizon touches the image boundary")

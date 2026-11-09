@@ -204,6 +204,14 @@ class TestWarpV07(unittest.TestCase):
         with self.assertRaises(homography.HomographyError):
             warp.warp_image(np.zeros((10, 10), dtype=np.uint8), H, (10, 10), (0, 0))
 
+    def test_check_h_accepts_small_scale(self):
+        # Reviewer regression: det = 1e-14 but H is invertible; a fixed
+        # determinant threshold would wrongly reject this downscale.
+        H = np.diag([1e-7, 1e-7, 1.0])
+        warp.check_h(H, (100, 100))
+        canvas, offset = warp.canvas_bounds([H], [(100, 100)])
+        self.assertEqual(canvas, (1, 1))
+
     def test_check_h_rejects_boundary_horizon(self):
         # w = -0.01*x + 1 is exactly 0 at x = 100 (the right image edge).
         H = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-0.01, 0.0, 1.0]])
