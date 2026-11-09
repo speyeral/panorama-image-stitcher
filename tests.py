@@ -158,13 +158,16 @@ class TestWarpV07(unittest.TestCase):
         self.assertEqual(canvas, (int(np.ceil(mapped[:, 1].max() - mapped[:, 1].min())),
                                   int(np.ceil(mapped[:, 0].max() - mapped[:, 0].min()))))
 
-    def test_canvas_cap_extreme_h(self):
+    def test_canvas_rejects_oversize_bounds(self):
+        # Reviewer regression: a valid H can exceed the canvas cap; bounds
+        # must be rejected rather than silently cropped.
         H = np.array([[1.0e6, 0.0, 0.0], [0.0, 1.0e6, 0.0], [0.0, 0.0, 1.0]])
-        canvas, _ = warp.canvas_bounds([H], [(100, 100)])
-        cH, cW = canvas
-        self.assertLessEqual(cH, warp.MAX_CANVAS_SIDE)
-        self.assertLessEqual(cW, warp.MAX_CANVAS_SIDE)
-        self.assertLessEqual(cH * cW, warp.MAX_CANVAS_PIXELS)
+        with self.assertRaises(homography.HomographyError):
+            warp.canvas_bounds([H], [(100, 100)])
+        # The reviewer's example: 2x100 image scaled by 250 in x.
+        H2 = np.array([[250.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        with self.assertRaises(homography.HomographyError):
+            warp.canvas_bounds([H2], [(2, 100)])
 
     def test_no_nan_or_inf(self):
         # H whose horizon crosses the canvas: w = 0 inside the image.
@@ -188,6 +191,24 @@ class TestWarpV07(unittest.TestCase):
 
     def test_canvas_bounds_propagates_check_h(self):
         H = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-0.02, 0.0, 1.0]])
+        with self.assertRaises(homography.HomographyError):
+            warp.canvas_bounds([H], [(100, 100)])
+
+    def test_check_h_rejects_singular(self):
+        # w = 1 at every corner, but H is singular: inverse warp impossible.
+        H = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+        with self.assertRaises(homography.HomographyError):
+            warp.check_h(H, (100, 100))
+        with self.assertRaises(homography.HomographyError):
+            warp.canvas_bounds([H], [(100, 100)])
+        with self.assertRaises(homography.HomographyError):
+            warp.warp_image(np.zeros((10, 10), dtype=np.uint8), H, (10, 10), (0, 0))
+
+    def test_check_h_rejects_boundary_horizon(self):
+        # w = -0.01*x + 1 is exactly 0 at x = 100 (the right image edge).
+        H = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-0.01, 0.0, 1.0]])
+        with self.assertRaises(homography.HomographyError):
+            warp.check_h(H, (100, 100))
         with self.assertRaises(homography.HomographyError):
             warp.canvas_bounds([H], [(100, 100)])
 
