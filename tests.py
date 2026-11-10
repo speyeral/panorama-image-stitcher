@@ -461,6 +461,169 @@ class TestWarpV07(unittest.TestCase):
             warp.canvas_bounds([H], [(100, 100)])
 
 
+class TestHomographyExact(unittest.TestCase):
+    """V0.4, V0.5, V0.6 tests for exact 4-point homography solver."""
+
+    def test_v04_random_mild_perspective_100_trials(self):
+        """V0.4: 100 trials with seeded RNG.
+        Mild-perspective H with perturbations and convex quad.
+        Assert np.allclose(rtol=1e-8, atol=1e-10) on H and transfer error < 1e-8 px.
+        """
+        rng = np.random.default_rng(20261110)
+        worst_te = 0.0
+        worst_h_diff = 0.0
+
+        for trial in range(100):
+            H = np.eye(3)
+            H[0, 0] += rng.uniform(-0.15, 0.15)
+            H[1, 1] += rng.uniform(-0.15, 0.15)
+            H[0, 1] += rng.uniform(-0.15, 0.15)
+            H[1, 0] += rng.uniform(-0.15, 0.15)
+            H[0, 2] += rng.uniform(-40, 40)
+            H[1, 2] += rng.uniform(-40, 40)
+            H[2, 0] += rng.uniform(-8e-4, 8e-4)
+            H[2, 1] += rng.uniform(-8e-4, 8e-4)
+            H[2, 2] = 1.0
+
+            src = np.array([
+                [100.0 + rng.uniform(-20, 20), 100.0 + rng.uniform(-20, 20)],
+                [600.0 + rng.uniform(-20, 20), 100.0 + rng.uniform(-20, 20)],
+                [600.0 + rng.uniform(-20, 20), 400.0 + rng.uniform(-20, 20)],
+                [100.0 + rng.uniform(-20, 20), 400.0 + rng.uniform(-20, 20)]
+            ])
+
+            src_h = np.hstack([src, np.ones((4, 1))])
+            dst_h = (H @ src_h.T).T
+            dst = dst_h[:, :2] / dst_h[:, 2:3]
+
+            H_est = homography.solve_homography(src, dst)
+            self.assertTrue(np.allclose(H, H_est, rtol=1e-8, atol=1e-10))
+
+            te = homography.transfer_error(H_est, src, dst)
+            max_te = np.max(te)
+            worst_te = max(worst_te, max_te)
+            worst_h_diff = max(worst_h_diff, np.max(np.abs(H - H_est)))
+            self.assertTrue(np.all(te < 1e-8))
+
+        print(f"\nV0.4 100 trials worst case: max transfer error = {worst_te:.3e} px, max |H - H_est| = {worst_h_diff:.3e}")
+
+    def test_v05_identity_and_affine_rhombus(self):
+        """V0.5: Identical large coordinates give H within 1e-9 of identity.
+        A rectangle sheared into a parallelogram gives |h31| and |h32| under 1e-9.
+        """
+        # Identical large coordinates
+        src = np.array([
+            [1200.0, 3400.0],
+            [5600.0, 3500.0],
+            [5500.0, 7800.0],
+            [1100.0, 7900.0]
+        ])
+        dst = src.copy()
+        H_id = homography.solve_homography(src, dst)
+        self.assertTrue(np.all(np.abs(H_id - np.eye(3)) < 1e-9))
+
+        # Sheared parallelogram (rhombus)
+        src_rect = np.array([
+            [100.0, 100.0],
+            [500.0, 100.0],
+            [500.0, 300.0],
+            [100.0, 300.0]
+        ])
+        A_aff = np.array([
+            [1.0, 0.4, 35.0],
+            [0.0, 1.0, -15.0],
+            [0.0, 0.0, 1.0]
+        ])
+        src_h = np.hstack([src_rect, np.ones((4, 1))])
+        dst_aff = (A_aff @ src_h.T).T[:, :2]
+        H_aff = homography.solve_homography(src_rect, dst_aff)
+
+        self.assertLess(abs(H_aff[2, 0]), 1e-9)
+        self.assertLess(abs(H_aff[2, 1]), 1e-9)
+        self.assertAlmostEqual(H_aff[2, 2], 1.0, places=9)
+
+    def test_v06_collinear_swapped_and_horizon_failures(self):
+        """V0.6: Failure cases raise HomographyError with distinct messages."""
+        valid_quad = np.array([
+            [100.0, 100.0],
+            [500.0, 100.0],
+            [500.0, 400.0],
+            [100.0, 400.0]
+        ])
+        collinear_quad = np.array([
+            [100.0, 100.0],
+            [300.0, 200.0],
+            [500.0, 300.0],
+            [100.0, 400.0]
+        ])
+        swapped_quad = np.array([
+            [100.0, 100.0],
+            [500.0, 400.0],
+            [500.0, 100.0],
+            [100.0, 400.0]
+        ])
+
+        # 1. Three collinear points in source
+        with self.assertRaises(homography.HomographyError) as ctx:
+            homography.solve_homography(collinear_quad, valid_quad)
+        msg_collinear_src = str(ctx.exception)
+        self.assertIn("collinear", msg_collinear_src)
+        self.assertIn("source", msg_collinear_src)
+
+        # 2. Three collinear points in destination
+        with self.assertRaises(homography.HomographyError) as ctx:
+            homography.solve_homography(valid_quad, collinear_quad)
+        msg_collinear_dst = str(ctx.exception)
+        self.assertIn("collinear", msg_collinear_dst)
+        self.assertIn("destination", msg_collinear_dst)
+
+        # 3. Swapped corners (bow-tie) in source
+        with self.assertRaises(homography.HomographyError) as ctx:
+            homography.solve_homography(swapped_quad, valid_quad)
+        msg_order_src = str(ctx.exception)
+        self.assertIn("order", msg_order_src)
+        self.assertIn("source", msg_order_src)
+
+        # 4. Swapped corners (bow-tie) in destination
+        with self.assertRaises(homography.HomographyError) as ctx:
+            homography.solve_homography(valid_quad, swapped_quad)
+        msg_order_dst = str(ctx.exception)
+        self.assertIn("order", msg_order_dst)
+        self.assertIn("destination", msg_order_dst)
+
+        # 5. Horizon check helper directly raises with horizon message on mixed-sign w
+        H_horiz = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.01, 0.0, 1.0]
+        ])
+        src_horiz = np.array([
+            [-200.0, 100.0],
+            [300.0, 100.0],
+            [300.0, 200.0],
+            [-200.0, 200.0]
+        ])
+        with self.assertRaises(homography.HomographyError) as ctx:
+            homography._check_horizon(H_horiz, src_horiz)
+        msg_horizon = str(ctx.exception)
+        self.assertIn("horizon", msg_horizon)
+
+        # 6. Correspondences generated from such an H raise HomographyError end to end
+        src_h = np.hstack([src_horiz, np.ones((4, 1))])
+        dst_h = (H_horiz @ src_h.T).T
+        dst_horiz = dst_h[:, :2] / dst_h[:, 2:3]
+        with self.assertRaises(homography.HomographyError):
+            homography.solve_homography(src_horiz, dst_horiz)
+
+        # 7. Distinct messages for each failure type
+        messages = {
+            "collinear": msg_collinear_src,
+            "order": msg_order_src,
+            "horizon": msg_horizon
+        }
+        self.assertEqual(len(set(messages.values())), 3)
+
+
 if __name__ == '__main__':
     unittest.main()
 
