@@ -116,6 +116,111 @@ class TestEndToEndKnownH(unittest.TestCase):
         self.assertTrue(valid[50, 50])
 
 
+class TestWarpV07(unittest.TestCase):
+    """V0.7: warp exactness, corners, canvas cap, no NaN, check_h guard."""
+
+    def test_identity_h_exact(self):
+        rng = np.random.default_rng(0)
+        img = rng.integers(0, 256, size=(40, 50), dtype=np.uint8)
+        H = np.eye(3)
+        canvas, offset = warp.canvas_bounds([H], [img.shape])
+        self.assertEqual(canvas, (40, 50))
+        np.testing.assert_allclose(offset, [0.0, 0.0])
+
+        out, valid, sx, sy = warp.warp_image(img, H, canvas, offset)
+        np.testing.assert_array_equal(out, img)
+        self.assertTrue(valid.all())
+        gx, gy = np.meshgrid(np.arange(50), np.arange(40))
+        np.testing.assert_allclose(sx, gx)
+        np.testing.assert_allclose(sy, gy)
+
+    def test_integer_translation_exact(self):
+        img = np.arange(100 * 80, dtype=np.uint8).reshape(100, 80)
+        tx, ty = 7, -13
+        H = np.array([[1.0, 0.0, tx], [0.0, 1.0, ty], [0.0, 0.0, 1.0]])
+        canvas, offset = warp.canvas_bounds([H], [img.shape])
+        self.assertEqual(canvas, (100, 80))
+        np.testing.assert_allclose(offset, [tx, ty])
+
+        out, valid, _, _ = warp.warp_image(img, H, canvas, offset)
+        np.testing.assert_array_equal(out, img)
+        self.assertTrue(valid.all())
+
+    def test_canvas_bounds_matches_mapped_corners(self):
+        # Scale by 2 about origin plus translate: dst = 2*src + (10, -5)
+        H = np.array([[2.0, 0.0, 10.0], [0.0, 2.0, -5.0], [0.0, 0.0, 1.0]])
+        shape = (30, 40)  # h=30, w=40
+        canvas, offset = warp.canvas_bounds([H], [shape])
+
+        corners = np.array([[0, 0], [40, 0], [40, 30], [0, 30]], dtype=float)
+        mapped = corners @ H[:2, :2].T + H[:2, 2]
+        np.testing.assert_allclose(offset, mapped.min(axis=0))
+        self.assertEqual(canvas, (int(np.ceil(mapped[:, 1].max() - mapped[:, 1].min())),
+                                  int(np.ceil(mapped[:, 0].max() - mapped[:, 0].min()))))
+
+    def test_canvas_rejects_oversize_bounds(self):
+        # Reviewer regression: a valid H can exceed the canvas cap; bounds
+        # must be rejected rather than silently cropped.
+        H = np.array([[1.0e6, 0.0, 0.0], [0.0, 1.0e6, 0.0], [0.0, 0.0, 1.0]])
+        with self.assertRaises(homography.HomographyError):
+            warp.canvas_bounds([H], [(100, 100)])
+        # The reviewer's example: 2x100 image scaled by 250 in x.
+        H2 = np.array([[250.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+        with self.assertRaises(homography.HomographyError):
+            warp.canvas_bounds([H2], [(2, 100)])
+
+    def test_no_nan_or_inf(self):
+        # H whose horizon crosses the canvas: w = 0 inside the image.
+        H = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-0.02, 0.0, 1.0]])
+        img = np.ones((100, 100), dtype=np.uint8)
+        # w' = 0.02*(x-100) + 1 vanishes at canvas x = 50, inside the canvas.
+        out, valid, sx, sy = warp.warp_image(img, H, (200, 200), (-100.0, -100.0))
+        for arr in (out, sx, sy):
+            self.assertTrue(np.all(np.isfinite(arr)))
+        # Some pixels must be invalid (the horizon region)
+        self.assertFalse(valid.all())
+
+    def test_check_h_raises_on_mixed_sign_w(self):
+        # w = -0.02*x + 1: +1 at x=0, -1 at x=100 -> sign change across image.
+        H = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-0.02, 0.0, 1.0]])
+        with self.assertRaises(homography.HomographyError):
+            warp.check_h(H, (100, 100))
+        # Same-sign w passes.
+        warp.check_h(np.eye(3), (100, 100))
+        warp.check_h(np.array([[2.0, 0, 5], [0, 2.0, 5], [0, 0, 1.0]]), (100, 100))
+
+    def test_canvas_bounds_propagates_check_h(self):
+        H = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-0.02, 0.0, 1.0]])
+        with self.assertRaises(homography.HomographyError):
+            warp.canvas_bounds([H], [(100, 100)])
+
+    def test_check_h_rejects_singular(self):
+        # w = 1 at every corner, but H is singular: inverse warp impossible.
+        H = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+        with self.assertRaises(homography.HomographyError):
+            warp.check_h(H, (100, 100))
+        with self.assertRaises(homography.HomographyError):
+            warp.canvas_bounds([H], [(100, 100)])
+        with self.assertRaises(homography.HomographyError):
+            warp.warp_image(np.zeros((10, 10), dtype=np.uint8), H, (10, 10), (0, 0))
+
+    def test_check_h_accepts_small_scale(self):
+        # Reviewer regression: det = 1e-14 but H is invertible; a fixed
+        # determinant threshold would wrongly reject this downscale.
+        H = np.diag([1e-7, 1e-7, 1.0])
+        warp.check_h(H, (100, 100))
+        canvas, offset = warp.canvas_bounds([H], [(100, 100)])
+        self.assertEqual(canvas, (1, 1))
+
+    def test_check_h_rejects_boundary_horizon(self):
+        # w = -0.01*x + 1 is exactly 0 at x = 100 (the right image edge).
+        H = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-0.01, 0.0, 1.0]])
+        with self.assertRaises(homography.HomographyError):
+            warp.check_h(H, (100, 100))
+        with self.assertRaises(homography.HomographyError):
+            warp.canvas_bounds([H], [(100, 100)])
+
+
 if __name__ == '__main__':
     unittest.main()
 
