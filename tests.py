@@ -811,8 +811,202 @@ class TestBlendV2(unittest.TestCase):
         # g ~= 1.5, so B's lone region lands near 75000 (float16 input
         # precision is ~32 at this magnitude).
         self.assertAlmostEqual(float(out[30, 45]), 75000.0, delta=500.0)
+class TestLinalgAcceptance(unittest.TestCase):
+    def test_v01_rref_is_independent_of_row_order(self):
+        rng = np.random.default_rng(20261111)
+        for _ in range(100):
+            full_rank = rng.normal(size=(8, 8))
+            rank_deficient = rng.integers(-5, 6, size=(8, 3)) @ rng.integers(-5, 6, size=(3, 8))
+            for matrix in (full_rank, rank_deficient):
+                expected = linalg.rref(matrix)
+                permuted = matrix[rng.permutation(matrix.shape[0])]
+                actual = linalg.rref(permuted)
+                np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-9)
+
+    def test_v02_solve_and_inverse_match_numpy(self):
+        rng = np.random.default_rng(20261112)
+        for _ in range(200):
+            A = rng.normal(size=(8, 8))
+            b = rng.normal(size=8)
+            actual_x = linalg.solve(A, b)
+            expected_x = np.linalg.solve(A, b)
+            self.assertLessEqual(
+                np.linalg.norm(actual_x - expected_x) / np.linalg.norm(expected_x),
+                1e-8,
+            )
+
+            actual_inverse = linalg.inverse(A)
+            expected_inverse = np.linalg.inv(A)
+            self.assertLessEqual(
+                np.linalg.norm(actual_inverse - expected_inverse) / np.linalg.norm(expected_inverse),
+                1e-8,
+            )
+            np.testing.assert_allclose(A @ actual_inverse, np.eye(8), rtol=0.0, atol=1e-10)
+
+        singular = np.array([[1.0, 2.0], [2.0, 4.0]])
+        with self.assertRaises(linalg.SingularMatrixError):
+            linalg.solve(singular, [1.0, 2.0])
+        with self.assertRaises(linalg.SingularMatrixError):
+            linalg.inverse(singular)
+
+    def test_v03_linear_algebra_identities(self):
+        rng = np.random.default_rng(20261113)
+        A = rng.normal(size=(4, 4))
+        B = rng.normal(size=(4, 4))
+        self.assertAlmostEqual(linalg.det(A @ B), linalg.det(A) * linalg.det(B), delta=1e-8)
+        self.assertAlmostEqual(linalg.det(A.T), linalg.det(A), delta=1e-8)
+        swapped = A.copy()
+        swapped[[0, 1]] = swapped[[1, 0]]
+        self.assertAlmostEqual(linalg.det(swapped), -linalg.det(A), delta=1e-8)
+
+        rank_three = np.array([
+            [1.0, 0.0, 0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0, 1.0],
+        ])
+        null_vectors = np.array([
+            [-1.0, 0.0, -1.0, 1.0, 0.0],
+            [0.0, -1.0, -1.0, 0.0, 1.0],
+        ])
+        self.assertEqual(linalg.rank(rank_three), 3)
+        np.testing.assert_allclose(rank_three @ null_vectors.T, 0.0, atol=1e-12)
+        self.assertEqual(
+            abs(np.linalg.det(null_vectors[:, 3:5])),
+            1.0,
+        )
+        self.assertEqual(linalg.rank(rank_three) + len(null_vectors), rank_three.shape[1])
+        self.assertLessEqual(
+            np.linalg.norm(rank_three @ linalg.nullspace_vector(rank_three)),
+            1e-9,
+        )
+
+        invertible = np.array([[2.0, -1.0, 3.0], [1.0, 4.0, 2.0], [3.0, 1.0, 5.0]])
+        cofactors = np.empty((3, 3))
+        for row in range(3):
+            for col in range(3):
+                minor = np.delete(np.delete(invertible, row, axis=0), col, axis=1)
+                cofactors[row, col] = (-1) ** (row + col) * linalg.det(minor)
+        adjugate = cofactors.T
+        np.testing.assert_allclose(
+            linalg.inverse(invertible),
+            adjugate / linalg.det(invertible),
+            rtol=0.0,
+            atol=1e-10,
+        )
+
+        rhs = np.array([3.0, 7.0, 2.0])
+        determinant = linalg.det(invertible)
+        cramer_solution = []
+        for col in range(3):
+            replaced = invertible.copy()
+            replaced[:, col] = rhs
+            cramer_solution.append(linalg.det(replaced) / determinant)
+        np.testing.assert_allclose(
+            linalg.solve(invertible, rhs),
+            cramer_solution,
+            rtol=0.0,
+            atol=1e-10,
+        )
+
+        consistent_A = np.array([[1.0, 2.0], [2.0, 4.0], [3.0, 6.0]])
+        consistent_b = np.array([3.0, 6.0, 9.0])
+        inconsistent_b = np.array([3.0, 6.0, 10.0])
+        self.assertEqual(
+            linalg.rank(consistent_A),
+            linalg.rank(np.column_stack((consistent_A, consistent_b))),
+        )
+        self.assertNotEqual(
+            linalg.rank(consistent_A),
+            linalg.rank(np.column_stack((consistent_A, inconsistent_b))),
+        )
+
+
+class TestLeastSquaresHomography(unittest.TestCase):
+    def _project(self, H, points):
+        points_h = np.column_stack((points, np.ones(len(points))))
+        mapped = (H @ points_h.T).T
+        return mapped[:, :2] / mapped[:, 2, None]
+
+    def test_v11_noise_free_eight_and_twelve_points(self):
+        rng = np.random.default_rng(20261114)
+        H_true = np.array([
+            [1.08, 0.03, 42.0],
+            [-0.02, 0.94, 31.0],
+            [0.00008, -0.00004, 1.0],
+        ])
+        for count in (8, 12):
+            src = rng.uniform(0.0, 800.0, size=(count, 2))
+            dst = self._project(H_true, src)
+            estimated = homography.solve_homography_lsq(src, dst)
+            np.testing.assert_allclose(estimated, H_true, rtol=0.0, atol=1e-8)
+            self.assertLess(homography.algebraic_residual(estimated, src, dst), 1e-16)
+
+    def test_v12_v14_normal_equation_optimality_and_four_point_comparison(self):
+        rng = np.random.default_rng(20261115)
+        H_true = np.array([
+            [1.03, -0.04, 18.0],
+            [0.05, 0.97, -23.0],
+            [0.00005, 0.00002, 1.0],
+        ])
+        rectangle = np.array([[0.0, 0.0], [600.0, 0.0], [600.0, 450.0], [0.0, 450.0]])
+        additional = rng.uniform([0.0, 0.0], [600.0, 450.0], size=(8, 2))
+        src = np.vstack((rectangle, additional))
+        dst = self._project(H_true, src) + rng.normal(0.0, 0.15, size=(len(src), 2))
+
+        estimated = homography.solve_homography_lsq(src, dst)
+        residual = homography.algebraic_residual(estimated, src, dst)
+        src_norm, _ = homography.normalize_points(src)
+        dst_norm, _ = homography.normalize_points(dst)
+        A, b = homography.build_system(src_norm, dst_norm)
+        H_norm = _normalized_homography(estimated, src, dst)
+        h = np.array([
+            H_norm[0, 0], H_norm[0, 1], H_norm[0, 2],
+            H_norm[1, 0], H_norm[1, 1], H_norm[1, 2],
+            H_norm[2, 0], H_norm[2, 1],
+        ])
+        normal_residual = A.T @ (A @ h - b)
+        self.assertLess(
+            np.linalg.norm(normal_residual) / max(np.linalg.norm(A.T @ b), 1.0),
+            1e-8,
+        )
+
+        for _ in range(1000):
+            perturbation = rng.normal(size=8)
+            perturbation *= 1e-5 / max(np.linalg.norm(perturbation), 1e-15)
+            candidate = h + perturbation
+            candidate_error = np.linalg.norm(A @ candidate - b) ** 2
+            self.assertGreaterEqual(candidate_error + 1e-12, residual)
+
+        exact_four_point = homography.solve_homography(src[:4], dst[:4])
+        four_point_residual = homography.algebraic_residual(exact_four_point, src, dst)
+        self.assertLessEqual(residual, four_point_residual + 1e-12)
+
+    def test_v15_rank_of_normal_matrix_matches_design_matrix(self):
+        rng = np.random.default_rng(20261116)
+        src = rng.uniform(0.0, 500.0, size=(12, 2))
+        dst = self._project(np.array([
+            [1.02, 0.01, 12.0],
+            [-0.01, 0.98, 15.0],
+            [0.00002, -0.00003, 1.0],
+        ]), src)
+        src_norm, _ = homography.normalize_points(src)
+        dst_norm, _ = homography.normalize_points(dst)
+        A, _ = homography.build_system(src_norm, dst_norm)
+        self.assertEqual(linalg.rank(A.T @ A), linalg.rank(A))
+
+    def test_v16_collinear_points_raise(self):
+        src = np.column_stack((np.arange(8.0), 2.0 * np.arange(8.0)))
+        dst = src + np.array([10.0, -3.0])
+        with self.assertRaises(homography.HomographyError):
+            homography.solve_homography_lsq(src, dst)
+
+
+def _normalized_homography(H, src, dst):
+    _, T_src = homography.normalize_points(src)
+    _, T_dst = homography.normalize_points(dst)
+    result = T_dst @ H @ linalg.inverse(T_src)
+    return result / result[2, 2]
 
 
 if __name__ == '__main__':
     unittest.main()
-
