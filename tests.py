@@ -672,8 +672,22 @@ class TestLinalgAcceptance(unittest.TestCase):
         swapped[[0, 1]] = swapped[[1, 0]]
         self.assertAlmostEqual(linalg.det(swapped), -linalg.det(A), delta=1e-8)
 
-        rank_three = rng.normal(size=(4, 3)) @ rng.normal(size=(3, 5))
-        self.assertEqual(linalg.rank(rank_three) + (5 - linalg.rank(rank_three)), 5)
+        rank_three = np.array([
+            [1.0, 0.0, 0.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0, 1.0],
+        ])
+        null_vectors = np.array([
+            [-1.0, 0.0, -1.0, 1.0, 0.0],
+            [0.0, -1.0, -1.0, 0.0, 1.0],
+        ])
+        self.assertEqual(linalg.rank(rank_three), 3)
+        np.testing.assert_allclose(rank_three @ null_vectors.T, 0.0, atol=1e-12)
+        self.assertEqual(
+            abs(np.linalg.det(null_vectors[:, 3:5])),
+            1.0,
+        )
+        self.assertEqual(linalg.rank(rank_three) + len(null_vectors), rank_three.shape[1])
         self.assertLessEqual(
             np.linalg.norm(rank_three @ linalg.nullspace_vector(rank_three)),
             1e-9,
