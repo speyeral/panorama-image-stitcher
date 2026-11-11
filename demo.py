@@ -117,14 +117,18 @@ def panorama(left_path, right_path, points_json,
     warped_l, valid_l, x_l, y_l = warp.warp_image(img_left, H_left, canvas_shape, offset)
     warped_r, valid_r, x_r, y_r = warp.warp_image(img_right, H_right, canvas_shape, offset)
 
-    # 6. Hard-cut panorama (left on top of right where valid)
-    hard_cut = np.zeros_like(warped_l)
-    hard_cut[valid_r] = warped_r[valid_r]
-    hard_cut[valid_l] = warped_l[valid_l]
-
-    # 7. Feather blend
+    # 6. Compute weights
     weights_l = blend.edge_weights(x_l, y_l, valid_l, img_left.shape)
     weights_r = blend.edge_weights(x_r, y_r, valid_r, img_right.shape)
+
+    # 7. Hard-cut composite: pick the photo with higher weight (clean seam between A and B)
+    hard_cut = np.zeros_like(warped_l)
+    take_l = valid_l & (~valid_r | (weights_l >= weights_r))
+    take_r = valid_r & ~take_l
+    hard_cut[take_r] = warped_r[take_r]
+    hard_cut[take_l] = warped_l[take_l]
+
+    # 8. Feather blend
     blended = blend.feather_blend(
         [warped_l, warped_r],
         [weights_l, weights_r],
@@ -212,14 +216,18 @@ def rectify_panorama(left_path, right_path, pairs_json, corners_json,
     warped_l, valid_l, x_l, y_l = warp.warp_image(img_left, H_left_total, canvas_shape, offset)
     warped_r, valid_r, x_r, y_r = warp.warp_image(img_right, H_right_total, canvas_shape, offset)
 
-    # 9. Hard-cut composite
-    hard_cut = np.zeros_like(warped_l)
-    hard_cut[valid_r] = warped_r[valid_r]
-    hard_cut[valid_l] = warped_l[valid_l]
-
-    # 10. Feather blend
+    # 9. Compute feather weights
     weights_l = blend.edge_weights(x_l, y_l, valid_l, img_left.shape)
     weights_r = blend.edge_weights(x_r, y_r, valid_r, img_right.shape)
+
+    # 10. Hard-cut composite: assign pixels to the photo with higher edge weight (clean Voronoi seam)
+    hard_cut = np.zeros_like(warped_l)
+    take_l = valid_l & (~valid_r | (weights_l >= weights_r))
+    take_r = valid_r & ~take_l
+    hard_cut[take_r] = warped_r[take_r]
+    hard_cut[take_l] = warped_l[take_l]
+
+    # 11. Feather blend
     blended = blend.feather_blend(
         [warped_l, warped_r],
         [weights_l, weights_r],
