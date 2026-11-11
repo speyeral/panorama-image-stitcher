@@ -793,6 +793,25 @@ class TestBlendV2(unittest.TestCase):
         out = blend.feather_blend([a, b], [wt, wt], exposure_gain=True)
         self.assertTrue(np.allclose(out[20, 25], 0.0, atol=1.0))
 
+    def test_float16_gain_does_not_produce_inf(self):
+        # Reviewer regression: gain-corrected float16 pixels above 65504
+        # must not become inf; the result widens to float64.
+        h, w = 40, 50
+        x, y = self._grid(h, w)
+        valid_a = np.zeros((h, w), dtype=bool); valid_a[:, :30] = True
+        valid_b = np.zeros((h, w), dtype=bool); valid_b[:, 20:] = True
+        wa = blend.edge_weights(x, y, valid_a, (h, w))
+        wb = blend.edge_weights(x, y, valid_b, (h, w))
+        img_a = np.where(valid_a, 60000, 0).astype(np.float16)
+        img_b = np.where(valid_b, np.where(x >= 30, 50000, 40000), 0).astype(np.float16)
+        out = blend.feather_blend([img_a, img_b], [wa, wb],
+                                  exposure_gain=True, valid=[valid_a, valid_b])
+        self.assertEqual(out.dtype, np.float64)
+        self.assertTrue(np.all(np.isfinite(out)))
+        # g ~= 1.5, so B's lone region lands near 75000 (float16 input
+        # precision is ~32 at this magnitude).
+        self.assertAlmostEqual(float(out[30, 45]), 75000.0, delta=500.0)
+
 
 if __name__ == '__main__':
     unittest.main()

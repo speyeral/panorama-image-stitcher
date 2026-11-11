@@ -100,14 +100,17 @@ def feather_blend(imgs, weights, exposure_gain=False, valid=None):
     channel_shape = imgs[0].shape[2:]
     dtype = imgs[0].dtype
     same_dtype = all(im.dtype == dtype for im in imgs)
+    gain_applied = exposure_gain and n > 1
     if same_dtype and np.issubdtype(dtype, np.integer):
         out_dtype = dtype
-    elif same_dtype and np.issubdtype(dtype, np.floating):
+    elif same_dtype and np.issubdtype(dtype, np.floating) and not gain_applied:
+        # Without gain, a convex combination cannot leave the input range.
+        # With gain, values can exceed it (e.g. float16 -> inf), so float64.
         out_dtype = dtype
     else:
         out_dtype = np.float64
 
-    gains = _estimate_gains(imgs, weights, h, w) if (exposure_gain and n > 1) else np.ones(n)
+    gains = _estimate_gains(imgs, weights, h, w) if gain_applied else np.ones(n)
 
     out = np.zeros((h, w) + channel_shape, dtype=out_dtype)
     rows_per_tile = max(1, TILE_PIXELS // max(w, 1))
