@@ -1,6 +1,7 @@
 import numpy as np
 import linalg
 from homography import HomographyError
+from blend import edge_weights, feather_blend
 
 W_EPS = 1e-12
 MAX_CANVAS_SIDE = 20000
@@ -143,7 +144,5 @@ def warp_image(img, H, canvas_shape, offset):
     return out, valid, src_x, src_y
 
 
-# Identity Stubs
-def edge_weights(x, y, valid, shape): return np.zeros_like(x)
-def feather_blend(imgs, weights): return imgs[0]
+# Identity Stub
 def ransac_homography(src, dst): return np.eye(3), np.ones(len(src), dtype=bool)

@@ -7,6 +7,7 @@ import numpy as np
 import linalg
 import homography
 import warp
+import blend
 
 class TestInterfaceContract(unittest.TestCase):
     def test_linalg_stubs_importable(self):
@@ -624,6 +625,192 @@ class TestHomographyExact(unittest.TestCase):
         self.assertEqual(len(set(messages.values())), 3)
 
 
+class TestBlendV2(unittest.TestCase):
+    """V2.1-V2.7: feather weights and blending."""
+
+    @staticmethod
+    def _grid(h, w):
+        return np.meshgrid(np.arange(w, dtype=float), np.arange(h, dtype=float))
+
+    def test_v21_weights_zero_outside_and_on_border(self):
+        h, w = 60, 80
+        x, y = self._grid(h, w)
+        valid = np.ones((h, w), dtype=bool)
+        valid[10:50, 10:70] = False
+        wt = blend.edge_weights(x, y, valid, (h, w))
+        # Zero on all four borders
+        self.assertTrue(np.all(wt[0, :] == 0) and np.all(wt[-1, :] == 0))
+        self.assertTrue(np.all(wt[:, 0] == 0) and np.all(wt[:, -1] == 0))
+        # Zero outside the valid mask, even in the interior
+        self.assertTrue(np.all(wt[10:50, 10:70] == 0))
+        # Positive strictly inside
+        self.assertGreater(wt[5, 5], 0)
+        self.assertGreater(wt[55, 75], 0)
+        self.assertGreater(wt[30, 5], 0)
+
+    def test_v22_weights_sum_to_one_and_output_in_range(self):
+        # Two identical constant images must reproduce the constant exactly:
+        # only possible if normalized weights sum to 1 (M2) everywhere,
+        # including the all-zero border fallback.
+        h, w = 40, 50
+        x, y = self._grid(h, w)
+        valid = np.ones((h, w), dtype=bool)
+        wt = blend.edge_weights(x, y, valid, (h, w))
+        c = np.full((h, w), 100.0)
+        out = blend.feather_blend([c, c], [wt, wt])
+        self.assertTrue(np.allclose(out, 100.0))
+        self.assertFalse(np.any(np.isnan(out)))
+
+        # Differing constants: output stays inside [min, max] of inputs (M3 convexity)
+        d = np.full((h, w), 140.0)
+        out2 = blend.feather_blend([c, d], [wt, wt])
+        self.assertTrue(np.all(out2 >= 100.0) and np.all(out2 <= 140.0))
+
+    def test_v24_constant_images_blend_smoothly(self):
+        h, w = 60, 100
+        x, y = self._grid(h, w)
+        valid_a = np.zeros((h, w), dtype=bool); valid_a[:, :70] = True
+        valid_b = np.zeros((h, w), dtype=bool); valid_b[:, 30:] = True
+        wa = blend.edge_weights(x, y, valid_a, (h, w))
+        wb = blend.edge_weights(x, y, valid_b, (h, w))
+        # Mimic warp_image output: zeros where invalid
+        img_a = np.where(valid_a, 100.0, 0.0)
+        img_b = np.where(valid_b, 140.0, 0.0)
+        out = blend.feather_blend([img_a, img_b], [wa, wb])
+        self.assertFalse(np.any(np.isnan(out)))
+        # Non-overlap pixels are exact
+        self.assertTrue(np.all(out[:, :30] == 100.0))
+        self.assertTrue(np.all(out[:, 70:] == 140.0))
+        # Overlap interior is strictly between the two constants
+        mid = out[30, 45]
+        self.assertGreater(mid, 100.0)
+        self.assertLess(mid, 140.0)
+        # Smooth: adjacent columns in the overlap never jump more than ~1 level
+        col_diffs = np.abs(np.diff(out[30].astype(float)))
+        self.assertLess(np.max(col_diffs[30:70]), 40.0)
+
+    def test_v25_horizontal_pan_gives_linear_ramp(self):
+        # A covers canvas cols [0,200), B covers [100,300): pure x-translation.
+        # Image height 400 makes vertical border distances exceed the 100px
+        # overlap on central rows, so weights reduce to the linear ramp (M4).
+        h, w = 400, 300
+        x, y = self._grid(h, w)
+        valid_a = np.zeros((h, w), dtype=bool); valid_a[:, :200] = True
+        valid_b = np.zeros((h, w), dtype=bool); valid_b[:, 100:] = True
+        # Source coords: A is identity, B is shifted by -100 in x.
+        xb = x - 100.0
+        wa = blend.edge_weights(x, y, valid_a, (h, 200))
+        wb = blend.edge_weights(xb, y, valid_b, (h, 200))
+        img_a = np.where(valid_a, 0.0, 0.0)
+        img_b = np.where(valid_b, 255.0, 0.0)
+        out = blend.feather_blend([img_a, img_b], [wa, wb])
+        # Central row: alpha_B must be the linear ramp (cx - 100) / 99.
+        row = 200
+        cols = np.arange(101, 199)
+        expected = 255.0 * (cols - 100.0) / 99.0
+        self.assertTrue(np.allclose(out[row, cols], expected, atol=2.0),
+                        f"ramp mismatch: {out[row, cols[:5]]} vs {expected[:5]}")
+
+    def test_v26_exposure_gain_recovers_brightness(self):
+        h, w = 40, 50
+        x, y = self._grid(h, w)
+        valid = np.ones((h, w), dtype=bool)
+        wt = blend.edge_weights(x, y, valid, (h, w))
+        a = np.full((h, w), 100.0)
+        b = np.full((h, w), 150.0)  # 1.5x brighter
+        out_plain = blend.feather_blend([a, b], [wt, wt])
+        self.assertTrue(np.allclose(out_plain[20, 25], 125.0, atol=1.0))
+        out_gain = blend.feather_blend([a, b], [wt, wt], exposure_gain=True)
+        self.assertTrue(np.allclose(out_gain, 100.0, atol=1.0),
+                        f"gain recovery failed, center={out_gain[20, 25]}")
+
+    def test_v27_seam_jump_at_least_50_percent_lower(self):
+        # Same translation geometry as V2.5; constant offset of 100 between
+        # images (exposure difference, no gain correction).
+        h, w = 400, 300
+        x, y = self._grid(h, w)
+        valid_a = np.zeros((h, w), dtype=bool); valid_a[:, :200] = True
+        valid_b = np.zeros((h, w), dtype=bool); valid_b[:, 100:] = True
+        xb = x - 100.0
+        wa = blend.edge_weights(x, y, valid_a, (h, 200))
+        wb = blend.edge_weights(xb, y, valid_b, (h, 200))
+        img_a = np.where(valid_a, 0.0, 0.0)
+        img_b = np.where(valid_b, 100.0, 0.0)
+        out = blend.feather_blend([img_a, img_b], [wa, wb])
+
+        # Hard cut: pick the image with the larger weight per pixel.
+        hard = np.where(wa >= wb, img_a, img_b)
+        row = 200
+        hard_jump = np.max(np.abs(np.diff(hard[row].astype(float))))
+        feather_jump = np.max(np.abs(np.diff(out[row].astype(float))))
+        self.assertGreater(hard_jump, 0)
+        self.assertLessEqual(feather_jump, 0.5 * hard_jump)
+
+    def test_valid_masks_fix_black_border_fallback(self):
+        # Reviewer regression: a valid black first image at a zero-weight
+        # border must not lose to a bright second image. With valid masks
+        # passed, coverage — not pixel brightness — picks the hard-cut image.
+        h, w = 60, 100
+        x, y = self._grid(h, w)
+        valid_a = np.zeros((h, w), dtype=bool); valid_a[:, :70] = True
+        valid_b = np.zeros((h, w), dtype=bool); valid_b[:, 30:] = True
+        wa = blend.edge_weights(x, y, valid_a, (h, w))
+        wb = blend.edge_weights(x, y, valid_b, (h, w))
+        img_a = np.where(valid_a, 0.0, 0.0)    # valid but black
+        img_b = np.where(valid_b, 200.0, 0.0)
+        out = blend.feather_blend([img_a, img_b], [wa, wb], valid=[valid_a, valid_b])
+        # Top border inside the overlap: both weights are 0, A is first valid.
+        self.assertEqual(out[0, 45], 0.0)
+        # B-only region still picks B.
+        self.assertEqual(out[30, 85], 200.0)
+
+    def test_gain_output_clipped_to_dtype_range(self):
+        # Reviewer regression: gain > 1 must not wrap bright uint8 pixels.
+        # A=100 in overlap, B=50 in overlap and 200 in its own region -> g=2,
+        # so B's lone region would hit 400 without clipping.
+        h, w = 40, 50
+        x, y = self._grid(h, w)
+        valid_a = np.zeros((h, w), dtype=bool); valid_a[:, :30] = True
+        valid_b = np.zeros((h, w), dtype=bool); valid_b[:, 20:] = True
+        wa = blend.edge_weights(x, y, valid_a, (h, w))
+        wb = blend.edge_weights(x, y, valid_b, (h, w))
+        img_a = np.where(valid_a, 100, 0).astype(np.uint8)
+        img_b = np.where(valid_b, np.where(x >= 30, 200, 50), 0).astype(np.uint8)
+        out = blend.feather_blend([img_a, img_b], [wa, wb],
+                                  exposure_gain=True, valid=[valid_a, valid_b])
+        self.assertEqual(out.dtype, np.uint8)
+        self.assertEqual(out[30, 45], 255)  # clipped, not wrapped to 144
+
+    def test_zero_gain_is_applied(self):
+        # Reviewer regression: a black reference overlap yields g = 0; the
+        # gain must still be applied (B is driven to the reference value).
+        h, w = 40, 50
+        x, y = self._grid(h, w)
+        valid = np.ones((h, w), dtype=bool)
+        wt = blend.edge_weights(x, y, valid, (h, w))
+        a = np.zeros((h, w))
+        b = np.full((h, w), 100.0)
+        out = blend.feather_blend([a, b], [wt, wt], exposure_gain=True)
+        self.assertTrue(np.allclose(out[20, 25], 0.0, atol=1.0))
+
+    def test_float16_gain_does_not_produce_inf(self):
+        # Reviewer regression: gain-corrected float16 pixels above 65504
+        # must not become inf; the result widens to float64.
+        h, w = 40, 50
+        x, y = self._grid(h, w)
+        valid_a = np.zeros((h, w), dtype=bool); valid_a[:, :30] = True
+        valid_b = np.zeros((h, w), dtype=bool); valid_b[:, 20:] = True
+        wa = blend.edge_weights(x, y, valid_a, (h, w))
+        wb = blend.edge_weights(x, y, valid_b, (h, w))
+        img_a = np.where(valid_a, 60000, 0).astype(np.float16)
+        img_b = np.where(valid_b, np.where(x >= 30, 50000, 40000), 0).astype(np.float16)
+        out = blend.feather_blend([img_a, img_b], [wa, wb],
+                                  exposure_gain=True, valid=[valid_a, valid_b])
+        self.assertEqual(out.dtype, np.float64)
+        self.assertTrue(np.all(np.isfinite(out)))
+        # g ~= 1.5, so B's lone region lands near 75000 (float16 input
+        # precision is ~32 at this magnitude).
+        self.assertAlmostEqual(float(out[30, 45]), 75000.0, delta=500.0)
 class TestLinalgAcceptance(unittest.TestCase):
     def test_v01_rref_is_independent_of_row_order(self):
         rng = np.random.default_rng(20261111)
