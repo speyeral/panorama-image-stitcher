@@ -215,6 +215,71 @@ def transfer_error(H, src, dst):
     return np.sqrt(np.sum((dst - dst_mapped)**2, axis=1))
 
 
-# Identity Stubs for interface freeze
-def solve_homography_lsq(src, dst): return np.eye(3)
-def algebraic_residual(H, src, dst): return 0.0
+def solve_homography_lsq(src, dst):
+    """Estimate a normalized homography from five or more point pairs."""
+    src = np.asarray(src, dtype=float)
+    dst = np.asarray(dst, dtype=float)
+    if src.ndim != 2 or src.shape[1:] != (2,):
+        raise HomographyError("src must be an (N, 2) array")
+    if dst.ndim != 2 or dst.shape[1:] != (2,):
+        raise HomographyError("dst must be an (N, 2) array")
+    if len(src) != len(dst):
+        raise HomographyError("src and dst must have the same number of points")
+    if len(src) < 5:
+        raise HomographyError("least-squares homography requires at least five point pairs")
+    if not np.all(np.isfinite(src)) or not np.all(np.isfinite(dst)):
+        raise HomographyError("Input points must contain only finite numbers")
+
+    src_norm, T_src = normalize_points(src)
+    dst_norm, T_dst = normalize_points(dst)
+    A, b = build_system(src_norm, dst_norm)
+    if linalg.rank(A) < 8:
+        raise HomographyError("rank-deficient point configuration; homography is not determined")
+
+    normal_matrix = A.T @ A
+    if linalg.rank(normal_matrix) < 8:
+        raise HomographyError("rank-deficient normal equations; homography is not determined")
+    h8 = linalg.solve(normal_matrix, A.T @ b)
+    H_norm = np.append(h8, 1.0).reshape(3, 3)
+    H = linalg.inverse(T_dst) @ H_norm @ T_src
+
+    if abs(H[2, 2]) <= H33_TOL:
+        raise HomographyError(f"h33 near zero: H[2, 2] magnitude is below tolerance ({H33_TOL})")
+    H = H / H[2, 2]
+    if not np.all(np.isfinite(H)):
+        raise HomographyError("least-squares homography contains non-finite values")
+    return H
+
+
+def algebraic_residual(H, src, dst):
+    """Return squared normalized-coordinate residual ||A h - b||^2."""
+    H = np.asarray(H, dtype=float)
+    src = np.asarray(src, dtype=float)
+    dst = np.asarray(dst, dtype=float)
+    if H.shape != (3, 3) or not np.all(np.isfinite(H)):
+        raise HomographyError("H must be a finite (3, 3) array")
+    if src.ndim != 2 or src.shape[1:] != (2,):
+        raise HomographyError("src must be an (N, 2) array")
+    if dst.ndim != 2 or dst.shape[1:] != (2,):
+        raise HomographyError("dst must be an (N, 2) array")
+    if len(src) != len(dst):
+        raise HomographyError("src and dst must have the same number of points")
+    if len(src) < 1:
+        raise HomographyError("at least one point pair is required")
+    if not np.all(np.isfinite(src)) or not np.all(np.isfinite(dst)):
+        raise HomographyError("Input points must contain only finite numbers")
+
+    src_norm, T_src = normalize_points(src)
+    dst_norm, T_dst = normalize_points(dst)
+    H_norm = T_dst @ H @ linalg.inverse(T_src)
+    if abs(H_norm[2, 2]) <= H33_TOL:
+        raise HomographyError("normalized homography has h33 near zero")
+    H_norm = H_norm / H_norm[2, 2]
+    A, b = build_system(src_norm, dst_norm)
+    h = np.array([
+        H_norm[0, 0], H_norm[0, 1], H_norm[0, 2],
+        H_norm[1, 0], H_norm[1, 1], H_norm[1, 2],
+        H_norm[2, 0], H_norm[2, 1],
+    ])
+    residual = A @ h - b
+    return float(np.dot(residual, residual))
