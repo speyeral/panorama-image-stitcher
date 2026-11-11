@@ -746,6 +746,53 @@ class TestBlendV2(unittest.TestCase):
         self.assertGreater(hard_jump, 0)
         self.assertLessEqual(feather_jump, 0.5 * hard_jump)
 
+    def test_valid_masks_fix_black_border_fallback(self):
+        # Reviewer regression: a valid black first image at a zero-weight
+        # border must not lose to a bright second image. With valid masks
+        # passed, coverage — not pixel brightness — picks the hard-cut image.
+        h, w = 60, 100
+        x, y = self._grid(h, w)
+        valid_a = np.zeros((h, w), dtype=bool); valid_a[:, :70] = True
+        valid_b = np.zeros((h, w), dtype=bool); valid_b[:, 30:] = True
+        wa = blend.edge_weights(x, y, valid_a, (h, w))
+        wb = blend.edge_weights(x, y, valid_b, (h, w))
+        img_a = np.where(valid_a, 0.0, 0.0)    # valid but black
+        img_b = np.where(valid_b, 200.0, 0.0)
+        out = blend.feather_blend([img_a, img_b], [wa, wb], valid=[valid_a, valid_b])
+        # Top border inside the overlap: both weights are 0, A is first valid.
+        self.assertEqual(out[0, 45], 0.0)
+        # B-only region still picks B.
+        self.assertEqual(out[30, 85], 200.0)
+
+    def test_gain_output_clipped_to_dtype_range(self):
+        # Reviewer regression: gain > 1 must not wrap bright uint8 pixels.
+        # A=100 in overlap, B=50 in overlap and 200 in its own region -> g=2,
+        # so B's lone region would hit 400 without clipping.
+        h, w = 40, 50
+        x, y = self._grid(h, w)
+        valid_a = np.zeros((h, w), dtype=bool); valid_a[:, :30] = True
+        valid_b = np.zeros((h, w), dtype=bool); valid_b[:, 20:] = True
+        wa = blend.edge_weights(x, y, valid_a, (h, w))
+        wb = blend.edge_weights(x, y, valid_b, (h, w))
+        img_a = np.where(valid_a, 100, 0).astype(np.uint8)
+        img_b = np.where(valid_b, np.where(x >= 30, 200, 50), 0).astype(np.uint8)
+        out = blend.feather_blend([img_a, img_b], [wa, wb],
+                                  exposure_gain=True, valid=[valid_a, valid_b])
+        self.assertEqual(out.dtype, np.uint8)
+        self.assertEqual(out[30, 45], 255)  # clipped, not wrapped to 144
+
+    def test_zero_gain_is_applied(self):
+        # Reviewer regression: a black reference overlap yields g = 0; the
+        # gain must still be applied (B is driven to the reference value).
+        h, w = 40, 50
+        x, y = self._grid(h, w)
+        valid = np.ones((h, w), dtype=bool)
+        wt = blend.edge_weights(x, y, valid, (h, w))
+        a = np.zeros((h, w))
+        b = np.full((h, w), 100.0)
+        out = blend.feather_blend([a, b], [wt, wt], exposure_gain=True)
+        self.assertTrue(np.allclose(out[20, 25], 0.0, atol=1.0))
+
 
 if __name__ == '__main__':
     unittest.main()
