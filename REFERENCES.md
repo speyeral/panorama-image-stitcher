@@ -4,42 +4,6 @@ Linear Algebra course project · Panorama stitching with homography matrices · 
 
 Scope: only the definitions and theorems the paper cites. No proofs are given here. Tasks, owners, schedule, interface, and verification live in the GitHub issues.
 
-
-## Interface contract
-
-```
-rref(M), solve(A, b), inverse(A), det(A), rank(M), nullspace_vector(M)   # linalg.py
-normalize_points(pts) -> (pts_n, T)
-solve_homography(src, dst) -> H              # N = 4, exact
-solve_homography_lsq(src, dst) -> H          # N >= 5 (we use 8-12), normal equations
-algebraic_residual(H, src, dst) -> float
-transfer_error(H, src, dst) -> array (N,)    # pixel distance per pair
-check_h(H, shape) -> None                    # or raises HomographyError
-canvas_bounds(H_list, shapes) -> (shape, offset)
-warp_image(img, H, canvas_shape, offset) -> (out, valid, x, y)
-edge_weights(x, y, valid, shape) -> w
-feather_blend(imgs, weights) -> out
-ransac_homography(src, dst) -> (H, inlier_mask)
-```
-
-Points are (N, 2) float arrays of (x, y). H is 3×3 with h33 = 1. `warp_image` must return the source coordinates and the validity mask.
-
-## Verification map
-
-| V-ID | Check | Author | Date |
-| --- | --- | --- | --- |
-| V0.1, V0.2 | RREF uniqueness; solve and inverse versus np.linalg (tests only) | Person 4 | Nov 9 |
-| V0.3 | Rank, nullity, consistency, determinant, adjoint, Cramer theorem checks | Person 4 | Nov 11 |
-| V0.4–V0.6 | Known-H; identity and affine; invalid input | Lead | Nov 9 |
-| V0.7 | Warp exactness, corners, canvas cap, no NaN | Person 2 | Nov 9 |
-| V0.8, V0.9 | Points; imgops | Person 3 | Nov 9 |
-| V0.10 | Hero demo on the real rectangle photo | Person 3 writes, Lead runs | Nov 9 |
-| V1.1–V1.6 | LSQ correctness, optimality, rank guard | Person 4 | Nov 11 |
-| V1.7, V1.8 | Monte Carlo with and without normalization | Person 4 | Nov 13 |
-| V2.1–V2.7 | Blend | Person 2 | Nov 11 |
-| V3.1–V3.3 | Gradients, Harris, patch matching | Person 3 | S3 |
-| V3.4–V3.8 | RANSAC accuracy, seed, failure cases, iteration formula, real pair | Lead | S3 |
-
 ## 1. Theorem table
 
 | Tag | Result used | Section | Book reference |
