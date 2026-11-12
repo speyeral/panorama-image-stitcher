@@ -136,3 +136,39 @@ The M-numbers restart inside each issue, so each is keyed by its GitHub issue ID
 - The theorem number for the determinant of a triangular matrix (used for det T = s²; not in the table above).
 - The section for permutation matrices.
 - The one-to-one theorem assignment inside the grouped rows T-rules and T-det.
+
+---
+
+### Core Pipeline & Math Modules
+
+- **[`linalg.py`]**: Custom linear algebra engine implemented from scratch without using `np.linalg`. Contains `rref`, `solve`, `inverse`, `det`, `rank`, and `nullspace_vector`.
+- **[`homography.py`]**: Solves projective transformations between images.
+  - `normalize_points`: Hartley centering & scaling to $\sqrt{2}$.
+  - `solve_homography`: Exact 4-point homography solver.
+  - `solve_homography_lsq`: Least-squares homography solver ($N \ge 5$) via normal equations $(A^T A) h = A^T b$ with rank guards.
+  - `transfer_error` & `algebraic_residual`: Error metrics for correspondences.
+- **[`warp.py`]**: Canvas setup and geometric mapping.
+  - `check_h`: Validates homographies against horizon singularities and boundary touch.
+  - `canvas_bounds`: Calculates bounding boxes for multiple transformed images.
+  - `warp_image`: Backward / inverse mapping with nearest-neighbor sampling.
+- **[`blend.py`]**: Panorama image blending.
+  - `edge_weights`: Distance-to-border linear weights.
+  - `feather_blend`: Seamless convex combination with optional exposure gain matching.
+
+---
+
+### I/O & Image Processing
+
+- **[`io_utils.py`]**: The only file allowed to import Pillow. Handles opening images, saving PNGs, and reading EXIF orientation tags.
+- **[`imgops.py`]**: Pure NumPy image operations treated as linear transformations: `grayscale` (matrix-vector product), `flip_h`/`flip_v` (permutation matrices), `resize` ($R \cdot I \cdot C^T$), and `apply_exif_orientation`.
+- **[`points.py`]**: JSON loading/saving for $(x, y)$ coordinate points, calibration chart generation, pixel stamping (`mark_points`), collinearity detection (`are_collinear`), and corner winding checks (`corner_order_ok`).
+
+---
+
+### CLI & Testing
+
+- **[`demo.py`]**: Primary user-facing command-line tool:
+  - `rectify`: Squares off an angled photo of a rectangle.
+  - `panorama`: Stitches two photos into a wide panorama (outputs hard-cut and blended).
+  - `rectify_panorama`: Stitches two photos and rectifies the scene in one pass.
+- **[`tests.py`]**: Full test runner (51 unit tests) covering mathematical proofs, contract checks, `np.linalg` ban verification, and acceptance criteria (V0.1–V0.9, V1.1–V1.6, V2.1–V2.7).
