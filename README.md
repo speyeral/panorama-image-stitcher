@@ -1,9 +1,5 @@
 # Panorama Stitcher & Rectifier: User Guide & Math Primer
 
-Welcome to the **Panorama Image Stitcher & Rectifier**. This document explains **how to use this software**, **the mathematical principles behind it** in plain language, and **the difference between hard-cut and blended results**.
-
----
-
 ## 1. What Does This Software Do?
 
 This software solves two primary geometric problems in computer vision:
