@@ -146,10 +146,6 @@ When two overlapping photos are warped onto a shared canvas, there is an overlap
 | :--- | :--- | :--- |
 | **How it works** | Takes pixels from Image A where valid; if Image A is missing, it takes pixels from Image B. | Uses a weighted average (convex combination) of both images across the overlap. |
 | **The Seam** | **Visible line / edge:** Any difference in brightness, white balance, or slight vignette creates an abrupt, noticeable step edge where Image A ends. | **Invisible transition:** The seam is completely smoothed out. |
-| **Mathematical Formula** | $\text{Output} = \begin{cases} I_A(p) & \text{if inside A} \\ I_B(p) & \text{if inside B} \end{cases}$ | $\text{Output}(p) = \alpha_A(p) \cdot I_A(p) + \alpha_B(p) \cdot I_B(p)$<br>where $\alpha_A + \alpha_B = 1$ |
+| **Mathematical Formula** | $\text{Output}(p) = I_A(p)$ (if inside A)<br>$\text{Output}(p) = I_B(p)$ (if inside B) | $\text{Output}(p) = \alpha_A(p) \cdot I_A(p) + \alpha_B(p) \cdot I_B(p)$<br>where $\alpha_A + \alpha_B = 1$ |
 | **Weighting Method** | Binary decision ($0$ or $1$). | **Distance-to-Border Weighting:** Pixels deep inside Photo A get weight near 1; as you approach Photo A's edge, its weight smoothly tapers to 0 while Photo B's weight rises to 1. |
 | **Exposure Gain** | None. | Optional exposure matching: adjusts the overall gain $g$ of Photo B so its brightness matches Photo A before blending. |
-
-### Summary:
-- **Hard-Cut** is useful for **diagnostic inspection**—it lets you see the exact physical boundary of the images and check whether edges and lines line up across the seam without being masked by smooth fading.
-- **Feather-Blended** is the **final presentation image**—it eliminates visual seams, exposure differences, and vignette shadows to produce a single continuous picture.
